@@ -86,6 +86,9 @@ LZFSE_INLINE int __builtin_ctzll(uint64_t val) {
 //  is the match "distance"; the distance in bytes between the current pointer
 //  and the start of the match.
 #define LZFSE_ENCODE_HASH_VALUES (1 << LZFSE_ENCODE_HASH_BITS)
+#define LZFSE_ENCODE_HASH_BITS_MAX 16
+#define LZFSE_ENCODE_HASH_VALUES_MAX (1 << LZFSE_ENCODE_HASH_BITS_MAX)
+#define LZFSE_ENCODE_HASH_WIDTH_MAX 8
 #define LZFSE_ENCODE_L_SYMBOLS 20
 #define LZFSE_ENCODE_M_SYMBOLS 20
 #define LZFSE_ENCODE_D_SYMBOLS 64
@@ -97,6 +100,8 @@ LZFSE_INLINE int __builtin_ctzll(uint64_t val) {
 #define LZFSE_MATCHES_PER_BLOCK 10000
 #define LZFSE_LITERALS_PER_BLOCK (4 * LZFSE_MATCHES_PER_BLOCK)
 #define LZFSE_DECODE_LITERALS_PER_BLOCK (4 * LZFSE_DECODE_MATCHES_PER_BLOCK)
+#define LZFSE_ENCODE_BLOCK_SIZE 262144
+#define LZFSE_ENCODE_HASH_CONSTANT 2654435761U
 
 //  LZFSE internal status. These values are used by internal LZFSE routines
 //  as return codes.  There should not be any good reason to change their
@@ -125,8 +130,8 @@ typedef int32_t lzfse_offset;
  *  doing any pointer chasing and without pulling in any additional cachelines.
  *  This provides a large performance win in practice. */
 typedef struct {
-  int32_t pos[LZFSE_ENCODE_HASH_WIDTH];
-  uint32_t value[LZFSE_ENCODE_HASH_WIDTH];
+  int32_t pos[LZFSE_ENCODE_HASH_WIDTH_MAX];
+  uint32_t value[LZFSE_ENCODE_HASH_WIDTH_MAX];
 } lzfse_history_set;
 
 /*! @abstract An lzfse match is a sequence of bytes in the source buffer that
@@ -200,7 +205,12 @@ typedef struct {
   //  History table used to search for matches. Each entry of the table
   //  corresponds to a group of four byte sequences in the input stream
   //  that hash to the same value.
-  lzfse_history_set history_table[LZFSE_ENCODE_HASH_VALUES];
+  lzfse_history_set history_table[LZFSE_ENCODE_HASH_VALUES_MAX];
+
+  uint32_t hash_bits;
+  uint32_t hash_width;
+  uint32_t good_match;
+  uint32_t hash_constant;
 } lzfse_encoder_state;
 
 /*! @abstract Decoder state object for lzfse compressed blocks. */
@@ -405,11 +415,15 @@ int lzfse_decode(lzfse_decoder_state *s);
 //  place if smaller.
 #define LZVN_ENCODE_MIN_DST_SIZE ((size_t)8)
 
+#define LZVN_ENCODE_HASH_BITS 14
+#define LZVN_ENCODE_MAX_LITERAL_BACKLOG 400
+
 size_t lzvn_decode_scratch_size(void);
 size_t lzvn_encode_scratch_size(void);
 size_t lzvn_encode_buffer(void *__restrict dst, size_t dst_size,
                           const void *__restrict src, size_t src_size,
-                          void *__restrict work);
+                          void *__restrict work, uint32_t hash_bits,
+                          size_t max_literal_backlog);
 size_t lzvn_decode_buffer(void *__restrict dst, size_t dst_size,
                           const void *__restrict src, size_t src_size);
 

@@ -31,10 +31,12 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 
 #define LZVN_ENCODE_HASH_BITS                                                  \
   14 // number of bits returned by the hash function [10, 16]
+#define LZVN_ENCODE_HASH_BITS_MAX 16
 #define LZVN_ENCODE_OFFSETS_PER_HASH                                           \
   4 // stored offsets stack for each hash value, MUST be 4
 #define LZVN_ENCODE_HASH_VALUES                                                \
   (1 << LZVN_ENCODE_HASH_BITS) // number of entries in hash table
+#define LZVN_ENCODE_HASH_VALUES_MAX (1 << LZVN_ENCODE_HASH_BITS_MAX)
 #define LZVN_ENCODE_MAX_DISTANCE                                               \
   0xffff // max match distance we can represent with LZVN encoding, MUST be
          // 0xFFFF
@@ -53,7 +55,7 @@ typedef struct {
 
 // Work size
 #define LZVN_ENCODE_WORK_SIZE                                                  \
-  (LZVN_ENCODE_HASH_VALUES * sizeof(lzvn_encode_entry_type))
+  (LZVN_ENCODE_HASH_VALUES_MAX * sizeof(lzvn_encode_entry_type))
 
 /*! @abstract Match */
 typedef struct {
@@ -106,6 +108,8 @@ typedef struct {
   // The number of entries in the table is LZVN_ENCODE_HASH_VALUES.
   lzvn_encode_entry_type *table;
 
+  uint32_t hash_bits;
+  size_t max_literal_backlog;
 } lzvn_encoder_state;
 
 /*! @abstract Encode source to destination.

@@ -90,6 +90,20 @@ LZFSE_API size_t lzfse_encode_buffer(uint8_t *__restrict dst_buffer,
                                      size_t src_size,
                                      void *__restrict scratch_buffer);
 
+LZFSE_API size_t lzfse_encode_buffer_tunable(uint8_t *__restrict dst_buffer,
+                                             size_t dst_size,
+                                             const uint8_t *__restrict src_buffer,
+                                             size_t src_size,
+                                             void *__restrict scratch_buffer,
+                                             uint32_t lzfse_hash_bits,
+                                             uint32_t hash_width,
+                                             uint32_t good_match,
+                                             uint32_t block_size,
+                                             uint32_t hash_constant,
+                                             size_t lzvn_threshold,
+                                             uint32_t lzvn_hash_bits,
+                                             size_t max_literal_backlog);
+
 /*! @abstract Get the required scratch buffer size to decompress using LZFSE. */
 LZFSE_API size_t lzfse_decode_scratch_size();
 

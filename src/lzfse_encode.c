@@ -32,7 +32,11 @@ size_t lzfse_encode_scratch_size() {
 
 size_t lzfse_encode_buffer_with_scratch(uint8_t *__restrict dst_buffer, 
                        size_t dst_size, const uint8_t *__restrict src_buffer,
-                       size_t src_size, void *__restrict scratch_buffer) {
+                       size_t src_size, void *__restrict scratch_buffer,
+                       uint32_t lzfse_hash_bits, uint32_t hash_width,
+                       uint32_t good_match, uint32_t block_size,
+                       uint32_t hash_constant, size_t lzvn_threshold,
+                       uint32_t lzvn_hash_bits, size_t max_literal_backlog) {
   const size_t original_size = src_size;
 
   // If input is really really small, go directly to uncompressed buffer
@@ -41,7 +45,7 @@ size_t lzfse_encode_buffer_with_scratch(uint8_t *__restrict dst_buffer,
     goto try_uncompressed;
 
   // If input is too small, try encoding with LZVN
-  if (src_size < LZFSE_ENCODE_LZVN_THRESHOLD) {
+  if (src_size < lzvn_threshold) {
     // need header + end-of-stream marker
     size_t extra_size = 4 + sizeof(lzvn_compressed_block_header);
     if (dst_size <= extra_size)
@@ -49,7 +53,8 @@ size_t lzfse_encode_buffer_with_scratch(uint8_t *__restrict dst_buffer,
 
     size_t sz = lzvn_encode_buffer(
         dst_buffer + sizeof(lzvn_compressed_block_header),
-        dst_size - extra_size, src_buffer, src_size, scratch_buffer);
+        dst_size - extra_size, src_buffer, src_size, scratch_buffer,
+        lzvn_hash_bits, max_literal_backlog);
     if (sz == 0 || sz >= src_size)
       goto try_uncompressed; // failed, or no compression, fall back to
                              // uncompressed block
@@ -71,6 +76,10 @@ size_t lzfse_encode_buffer_with_scratch(uint8_t *__restrict dst_buffer,
   {
     lzfse_encoder_state *state = scratch_buffer;
     memset(state, 0x00, sizeof *state);
+    state->hash_bits = lzfse_hash_bits;
+    state->hash_width = hash_width;
+    state->good_match = good_match;
+    state->hash_constant = hash_constant;
     if (lzfse_encode_init(state) != LZFSE_STATUS_OK)
       goto try_uncompressed;
     state->dst = dst_buffer;
@@ -86,7 +95,7 @@ size_t lzfse_encode_buffer_with_scratch(uint8_t *__restrict dst_buffer,
       //  2GB because it's actually faster to change algorithms well before
       //  it's necessary for correctness.
       //  The first chunk, we just process normally.
-      const lzfse_offset encoder_block_size = 262144;
+      const lzfse_offset encoder_block_size = block_size;
       state->src_end = encoder_block_size;
       if (lzfse_encode_base(state) != LZFSE_STATUS_OK)
         goto try_uncompressed;
@@ -156,8 +165,42 @@ size_t lzfse_encode_buffer(uint8_t *__restrict dst_buffer, size_t dst_size,
     return 0;
   ret = lzfse_encode_buffer_with_scratch(dst_buffer, 
                         dst_size, src_buffer, 
-                        src_size, scratch_buffer);
+                        src_size, scratch_buffer,
+                        LZFSE_ENCODE_HASH_BITS, LZFSE_ENCODE_HASH_WIDTH,
+                        LZFSE_ENCODE_GOOD_MATCH, LZFSE_ENCODE_BLOCK_SIZE,
+                        LZFSE_ENCODE_HASH_CONSTANT, LZFSE_ENCODE_LZVN_THRESHOLD,
+                        LZVN_ENCODE_HASH_BITS, LZVN_ENCODE_MAX_LITERAL_BACKLOG);
   if (has_malloc)
     free(scratch_buffer);
   return ret;
 } 
+
+size_t lzfse_encode_buffer_tunable(uint8_t *__restrict dst_buffer, size_t dst_size,
+                           const uint8_t *__restrict src_buffer,
+                           size_t src_size, void *__restrict scratch_buffer,
+                           uint32_t lzfse_hash_bits, uint32_t hash_width,
+                           uint32_t good_match, uint32_t block_size,
+                           uint32_t hash_constant, size_t lzvn_threshold,
+                           uint32_t lzvn_hash_bits, size_t max_literal_backlog) {
+  int has_malloc = 0;
+  size_t ret = 0;
+
+  // Deal with the possible NULL pointer
+  if (scratch_buffer == NULL) {
+    // +1 in case scratch size could be zero
+    scratch_buffer = malloc(lzfse_encode_scratch_size() + 1);
+    has_malloc = 1;
+  }
+  if (scratch_buffer == NULL)
+    return 0;
+  ret = lzfse_encode_buffer_with_scratch(dst_buffer, 
+                        dst_size, src_buffer, 
+                        src_size, scratch_buffer,
+                        lzfse_hash_bits, hash_width,
+                        good_match, block_size,
+                        hash_constant, lzvn_threshold,
+                        lzvn_hash_bits, max_literal_backlog);
+  if (has_malloc)
+    free(scratch_buffer);
+  return ret;
+}

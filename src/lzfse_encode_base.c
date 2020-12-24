@@ -25,9 +25,9 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 #include "lzfse_encode_tables.h"
 
 /*! @abstract Get hash in range [0, LZFSE_ENCODE_HASH_VALUES-1] from 4 bytes in X. */
-static inline uint32_t hashX(uint32_t x) {
-  return (x * 2654435761U) >>
-         (32 - LZFSE_ENCODE_HASH_BITS); // Knuth multiplicative hash
+static inline uint32_t hashX(uint32_t x, uint32_t hash_bits, uint32_t hash_constant) {
+  return (x * hash_constant) >>
+         (32 - hash_bits); // Knuth multiplicative hash
 }
 
 /*! @abstract Return value with all 0 except nbits<=32 unsigned bits from V
@@ -590,12 +590,12 @@ static int lzfse_backend_end_of_stream(lzfse_encoder_state *s) {
 int lzfse_encode_init(lzfse_encoder_state *s) {
   const lzfse_match NO_MATCH = {0};
   lzfse_history_set line;
-  for (int i = 0; i < LZFSE_ENCODE_HASH_WIDTH; i++) {
+  for (int i = 0; i < s->hash_width; i++) {
     line.pos[i] = -4 * LZFSE_ENCODE_MAX_D_VALUE; // invalid pos
     line.value[i] = 0;
   }
   // Fill table
-  for (int i = 0; i < LZFSE_ENCODE_HASH_VALUES; i++)
+  for (int i = 0; i < (1 << s->hash_bits); i++)
     s->history_table[i] = line;
   s->pending = NO_MATCH;
   s->src_literal = 0;
@@ -626,9 +626,9 @@ int lzfse_encode_translate(lzfse_encoder_state *s, lzfse_offset delta) {
 
   // history_table positions, translated, and clamped to invalid pos
   int32_t invalidPos = -4 * LZFSE_ENCODE_MAX_D_VALUE;
-  for (int i = 0; i < LZFSE_ENCODE_HASH_VALUES; i++) {
+  for (int i = 0; i < (1 << s->hash_bits); i++) {
     int32_t *p = &(s->history_table[i].pos[0]);
-    for (int j = 0; j < LZFSE_ENCODE_HASH_WIDTH; j++) {
+    for (int j = 0; j < s->hash_width; j++) {
       lzfse_offset newPos = p[j] - delta; // translate
       p[j] = (int32_t)((newPos < invalidPos) ? invalidPos : newPos); // clamp
     }
@@ -656,17 +656,17 @@ int lzfse_encode_base(lzfse_encoder_state *s) {
 
     // Load 4 byte value and get hash line
     uint32_t x = load4(s->src + pos);
-    hashLine = history_table + hashX(x);
+    hashLine = history_table + hashX(x, s->hash_bits, s->hash_constant);
     lzfse_history_set h = *hashLine;
 
     // Prepare next hash line (component 0 is the most recent) to prepare new
     // entries (stored later)
     {
       newH.pos[0] = (int32_t)pos;
-      for (int k = 0; k < LZFSE_ENCODE_HASH_WIDTH - 1; k++)
+      for (int k = 0; k < s->hash_width - 1; k++)
         newH.pos[k + 1] = h.pos[k];
       newH.value[0] = x;
-      for (int k = 0; k < LZFSE_ENCODE_HASH_WIDTH - 1; k++)
+      for (int k = 0; k < s->hash_width - 1; k++)
         newH.value[k + 1] = h.value[k];
     }
 
@@ -678,7 +678,7 @@ int lzfse_encode_base(lzfse_encoder_state *s) {
     lzfse_match incoming = {.pos = pos, .ref = 0, .length = 0};
 
     // Check for matches.  We consider matches of length >= 4 only.
-    for (int k = 0; k < LZFSE_ENCODE_HASH_WIDTH; k++) {
+    for (int k = 0; k < s->hash_width; k++) {
       uint32_t d = h.value[k] ^ x;
       if (d)
         continue; // no 4 byte match
@@ -756,7 +756,7 @@ int lzfse_encode_base(lzfse_encoder_state *s) {
     // Match filtering heuristic (from LZVN). INCOMING is always defined here.
 
     // Incoming is 'good', emit incoming
-    if (incoming.length >= LZFSE_ENCODE_GOOD_MATCH) {
+    if (incoming.length >= s->good_match) {
       if (lzfse_backend_match(s, &incoming) != LZFSE_STATUS_OK) {
         ok = 0;
         goto END;

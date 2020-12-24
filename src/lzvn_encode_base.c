@@ -192,10 +192,10 @@ static inline lzvn_offset offset_from_s32(int32_t x) { return (lzvn_offset)x; }
 // Hash and Matching
 
 /*! @abstract Get hash in range \c [0,LZVN_ENCODE_HASH_VALUES-1] from 3 bytes in i. */
-static inline uint32_t hash3i(uint32_t i) {
+static inline uint32_t hash3i(uint32_t i, uint32_t hash_bits) {
   i &= 0xffffff; // truncate to 24-bit input (slightly increases compression ratio)
   uint32_t h = (i * (1 + (1 << 6) + (1 << 12))) >> 12;
-  return h & (LZVN_ENCODE_HASH_VALUES - 1);
+  return h & ((1 << hash_bits) - 1);
 }
 
 /*! @abstract Return the number [0, 4] of zero bytes in \p x, starting from the
@@ -376,7 +376,7 @@ static inline void lzvn_init_table(lzvn_encoder_state *state) {
     e.indices[i] = offset_to_s32(index);
     e.values[i] = value;
   }
-  for (int u = 0; u < LZVN_ENCODE_HASH_VALUES; u++)
+  for (int u = 0; u < (1 << state->hash_bits); u++)
     state->table[u] = e; // fill entire table
 }
 
@@ -388,7 +388,7 @@ void lzvn_encode(lzvn_encoder_state *state) {
     uint32_t vi = load4(state->src + state->src_current);
 
     // Compute new hash H at position I, and push value into position table
-    int h = hash3i(vi); // index of first entry
+    int h = hash3i(vi, state->hash_bits); // index of first entry
 
     // Read table entries for H
     lzvn_encode_entry_type e = state->table[h];
@@ -480,7 +480,7 @@ void lzvn_encode(lzvn_encoder_state *state) {
     // match, or literals if there is no pending match
     if (incoming.M == 0) {
       if (state->src_current - state->src_literal >=
-          LZVN_ENCODE_MAX_LITERAL_BACKLOG) // at this point, we always have
+          state->max_literal_backlog) // at this point, we always have
                                            // current >= literal
       {
         if (state->pending.M != 0) {
@@ -535,7 +535,8 @@ size_t lzvn_encode_scratch_size(void) { return LZVN_ENCODE_WORK_SIZE; }
 
 static size_t lzvn_encode_partial(void *__restrict dst, size_t dst_size,
                                   const void *__restrict src, size_t src_size,
-                                  size_t *src_used, void *__restrict work) {
+                                  size_t *src_used, void *__restrict work,
+                                  uint32_t hash_bits, size_t max_literal_backlog) {
   // Min size checks to avoid accessing memory outside buffers.
   if (dst_size < LZVN_ENCODE_MIN_DST_SIZE) {
     *src_used = 0;
@@ -559,6 +560,8 @@ static size_t lzvn_encode_partial(void *__restrict dst, size_t dst_size,
   state.dst_begin = dst;
   state.dst_end = (unsigned char *)dst + dst_size - 8; // reserve 8 bytes for end-of-stream
   state.table = work;
+  state.hash_bits = hash_bits;
+  state.max_literal_backlog = max_literal_backlog;
 
   // Do not encode if the input buffer is too small. We'll emit a literal instead.
   if (src_size >= LZVN_ENCODE_MIN_SRC_SIZE) {
@@ -583,10 +586,12 @@ static size_t lzvn_encode_partial(void *__restrict dst, size_t dst_size,
 
 size_t lzvn_encode_buffer(void *__restrict dst, size_t dst_size,
                           const void *__restrict src, size_t src_size,
-                          void *__restrict work) {
+                          void *__restrict work, uint32_t hash_bits,
+                          size_t max_literal_backlog) {
   size_t src_used = 0;
   size_t dst_used =
-      lzvn_encode_partial(dst, dst_size, src, src_size, &src_used, work);
+      lzvn_encode_partial(dst, dst_size, src, src_size, &src_used, work,
+                          hash_bits, max_literal_backlog);
   if (src_used != src_size)
     return 0;      // could not encode entire input stream = fail
   return dst_used; // return encoded size
